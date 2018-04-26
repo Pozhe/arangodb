@@ -27,6 +27,7 @@
 #include "Basics/Common.h"
 #include "Basics/Mutex.h"
 #include "Indexes/IndexIterator.h"
+#include "RocksDBEngine/RocksDBIterators.h"
 #include "RocksDBEngine/RocksDBReplicationCommon.h"
 #include "Transaction/Methods.h"
 #include "Utils/DatabaseGuard.h"
@@ -49,7 +50,7 @@ class RocksDBReplicationContext {
     CollectionIterator(
         LogicalCollection& collection, transaction::Methods& trx) noexcept;
     LogicalCollection& logical;
-    std::unique_ptr<IndexIterator> iter;
+    std::unique_ptr<RocksDBGenericIterator> iter;
     uint64_t currentTick;
     std::atomic<bool> isUsed;
     bool hasMore;

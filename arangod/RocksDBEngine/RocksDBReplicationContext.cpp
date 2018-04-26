@@ -290,11 +290,13 @@ RocksDBReplicationResult RocksDBReplicationContext::dump(
   arangodb::basics::VPackStringBufferAdapter adapter(buff.stringBuffer());
 
   VPackBuilder builder(&collection->vpackOptions);
+  VPackBuilder keyBuilder(&collection->vpackOptions);
 
   auto cb = [this, collection, &type, &buff, &adapter,
-             &builder](LocalDocumentId const& documentId) {
+             &builder,&keyBuilder](rocksdb::Slice const& rocksKey, rocksdb::Slice const& rocksValue) {
+    keyBuilder.clear();
+    auto documentId = RocksDBKey::documentId(RocksDBEntryType::Document, rocksKey);
     builder.clear();
-
     builder.openObject();
     // set type
     builder.add("type", VPackValue(type));
@@ -381,7 +383,7 @@ arangodb::Result RocksDBReplicationContext::dumpKeyChunks(VPackBuilder& b,
   b.openArray();
   while (_collection->hasMore) {
     try {
-      _collection->hasMore = static_cast<RocksDBGenericAllIndexIterator*>(_collection->iter.get())->gnext(cb, chunkSize);
+      _collection->hasMore = _collection->iter->next(cb, chunkSize);
 
       if (lowKey.empty()) {
         // if lowKey is empty, no new documents were found
@@ -421,7 +423,7 @@ arangodb::Result RocksDBReplicationContext::dumpKeys(
   }
 
   TRI_ASSERT(_collection->iter);
-  RocksDBGenericAllIndexIterator* primary = static_cast<RocksDBGenericAllIndexIterator*>(_collection->iter.get());
+  auto primary = _collection->iter.get();
 
   // Position the iterator correctly
   if (chunk != 0 && ((std::numeric_limits<std::size_t>::max() / chunk) < chunkSize)) {
@@ -472,7 +474,7 @@ arangodb::Result RocksDBReplicationContext::dumpKeys(
   b.openArray();
   // chunkSize is going to be ignored here
   try {
-    _collection->hasMore = primary->gnext(cb, chunkSize);
+    _collection->hasMore = primary->next(cb, chunkSize);
     _lastIteratorOffset++;
   } catch (std::exception const&) {
     return rv.reset(TRI_ERROR_INTERNAL);
@@ -496,8 +498,7 @@ arangodb::Result RocksDBReplicationContext::dumpDocuments(
   }
 
   TRI_ASSERT(_collection->iter);
-  RocksDBSortedAllIterator* primary =
-      static_cast<RocksDBSortedAllIterator*>(_collection->iter.get());
+  auto primary = _collection->iter.get();
 
   // Position the iterator must be reset to the beginning
   // after calls to dumpKeys moved it forwards
@@ -535,9 +536,9 @@ arangodb::Result RocksDBReplicationContext::dumpDocuments(
     }
   }
 
-  auto cb = [&](LocalDocumentId const& token) {
-    bool ok =
-        _collection->logical.readDocument(_trx.get(), token, _collection->mdr);
+  auto cb = [&](rocksdb::Slice const& rocksKey, rocksdb::Slice const& rocksVal) {
+    auto token = RocksDBKey::documentId(RocksDBEntryType::Document, rocksKey);
+    bool ok = _collection->logical.readDocument(_trx.get(), token, _collection->mdr);
     if (!ok) {
       // TODO: do something here?
       return;
@@ -575,7 +576,7 @@ arangodb::Result RocksDBReplicationContext::dumpDocuments(
     if (offset < offsetInChunk) {
       // skip over the initial few documents
       hasMore = _collection->iter->next(
-          [&b](LocalDocumentId const&) {
+          [&b](rocksdb::Slice const&, rocksdb::Slice const&) {
             b.add(VPackValue(VPackValueType::Null));
           },
           1);
@@ -706,8 +707,8 @@ RocksDBReplicationContext::CollectionIterator::CollectionIterator(
   TRI_DEFER(ExecContext::CURRENT = old);
 
   trx.addCollectionAtRuntime(collection.name());
-  iter = static_cast<RocksDBCollection*>(logical.getPhysical())
-             ->getSortedAllIterator(&trx);
+  auto iterator = createGenericIterator(&trx, RocksDBColumnFamily::documents(), &logical);
+  iter = std::make_unique<RocksDBGenericIterator>(std::move(iterator));
 
   customTypeHandler = trx.transactionContextPtr()->orderCustomTypeHandler();
   vpackOptions.customTypeHandler = customTypeHandler.get();
