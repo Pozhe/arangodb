@@ -711,8 +711,8 @@ RocksDBReplicationContext::CollectionIterator::CollectionIterator(
   TRI_DEFER(ExecContext::CURRENT = old);
 
   trx.addCollectionAtRuntime(collection.name());
-  auto iterator = createGenericIterator(&trx, RocksDBColumnFamily::documents(), &logical);
-  iter = std::make_unique<RocksDBGenericIterator>(std::move(iterator));
+  auto iterator = createDocumentIterator(&trx, &logical);
+  iter = std::make_unique<RocksDBGenericIterator>(std::move(iterator)); //move to heap
 
   customTypeHandler = trx.transactionContextPtr()->orderCustomTypeHandler();
   vpackOptions.customTypeHandler = customTypeHandler.get();
