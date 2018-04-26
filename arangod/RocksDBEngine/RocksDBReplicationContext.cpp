@@ -436,7 +436,7 @@ arangodb::Result RocksDBReplicationContext::dumpKeys(
 
   if (from != _lastIteratorOffset) {
     if (!lowKey.empty()) {
-      primary->seek(StringRef(lowKey));
+      primary->seek(lowKey);
       _lastIteratorOffset = from;
     } else {  // no low key supplied, we can not use seek
       if (from == 0 || !_collection->hasMore || from < _lastIteratorOffset) {
@@ -512,7 +512,7 @@ arangodb::Result RocksDBReplicationContext::dumpDocuments(
 
   if (from != _lastIteratorOffset) {
     if (!lowKey.empty()) {
-      primary->seek(StringRef(lowKey));
+      primary->seek(lowKey);
       _lastIteratorOffset = from;
     } else {  // no low key supplied, we can not use seek
       if (from == 0 || !_collection->hasMore || from < _lastIteratorOffset) {
