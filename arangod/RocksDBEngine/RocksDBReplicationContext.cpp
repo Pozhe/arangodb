@@ -295,7 +295,7 @@ RocksDBReplicationResult RocksDBReplicationContext::dump(
   auto cb = [this, collection, &type, &buff, &adapter,
              &builder,&keyBuilder](rocksdb::Slice const& rocksKey, rocksdb::Slice const& rocksValue) {
     keyBuilder.clear();
-    auto documentId = RocksDBKey::documentId(RocksDBEntryType::Document, rocksKey);
+    auto documentId = RocksDBValue::documentId(rocksValue);
     builder.clear();
     builder.openObject();
     // set type
@@ -361,6 +361,7 @@ arangodb::Result RocksDBReplicationContext::dumpKeyChunks(VPackBuilder& b,
   uint64_t hash = 0x012345678;
 
   auto cb = [&](rocksdb::Slice const& rocksKey, rocksdb::Slice const& rocksValue) {
+    //read document - proably not neccessay failed check was not handled anyway
     highKey = RocksDBKey::primaryKey(rocksKey).toString();
     TRI_voc_rid_t docRev = uint64FromPersistent(rocksValue.data() + sizeof(std::uint64_t));
 
@@ -540,9 +541,9 @@ arangodb::Result RocksDBReplicationContext::dumpDocuments(
     }
   }
 
-  auto cb = [&](rocksdb::Slice const& rocksKey, rocksdb::Slice const& rocksVal) {
-    auto token = RocksDBKey::documentId(RocksDBEntryType::Document, rocksKey);
-    bool ok = _collection->logical.readDocument(_trx.get(), token, _collection->mdr);
+  auto cb = [&](rocksdb::Slice const& rocksKey, rocksdb::Slice const& rocksValue) {
+    auto documentId = RocksDBValue::documentId(rocksValue);
+    bool ok = _collection->logical.readDocument(_trx.get(), documentId, _collection->mdr);
     if (!ok) {
       // TODO: do something here?
       return;
@@ -558,10 +559,13 @@ arangodb::Result RocksDBReplicationContext::dumpDocuments(
   size_t oldPos = from;
   size_t offset = 0;
 
+  LOG_DEVEL << ids.toJson();
+
   for (auto const& it : VPackArrayIterator(ids)) {
     if (!it.isNumber()) {
       return Result(TRI_ERROR_BAD_PARAMETER);
     }
+    LOG_DEVEL << it.toJson();
     if (!hasMore) {
       LOG_TOPIC(ERR, Logger::REPLICATION) << "Not enough data";
       b.close();
@@ -591,6 +595,7 @@ arangodb::Result RocksDBReplicationContext::dumpDocuments(
         full = true;
       }
     }
+    LOG_DEVEL << "has more (ids loop): " << std::boolalpha << hasMore;
     _lastIteratorOffset++;
     oldPos = newPos + 1;
     ++offset;
@@ -711,8 +716,10 @@ RocksDBReplicationContext::CollectionIterator::CollectionIterator(
   TRI_DEFER(ExecContext::CURRENT = old);
 
   trx.addCollectionAtRuntime(collection.name());
-  auto iterator = createDocumentIterator(&trx, &logical);
+  auto iterator = createPrimaryIndexIterator(&trx, &logical);
+  LOG_DEVEL << "fresh iterator (replication context) hasMore: " << std::boolalpha << iterator.hasMore();
   iter = std::make_unique<RocksDBGenericIterator>(std::move(iterator)); //move to heap
+  LOG_DEVEL << "fresh iterator (replication context) hasMore: " << std::boolalpha << iter->hasMore();
 
   customTypeHandler = trx.transactionContextPtr()->orderCustomTypeHandler();
   vpackOptions.customTypeHandler = customTypeHandler.get();
